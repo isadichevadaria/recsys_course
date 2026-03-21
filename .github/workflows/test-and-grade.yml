@@ -25,6 +25,14 @@ jobs:
         run: ruff check . --output-format=github 
         continue-on-error: true
 
+      - name: Graduate sem1 tests
+        run: python -m unittest discover -p "test1.py"
+
+      - name: Graduate sem2 tests
+        run: python -m unittest discover -p "test2.py"
+
+      - name: Graduate sem3 tests
+        run: python -m unittest discover -p "test3.py"
       
-      - name: Graduate score
-        run: python -m unittest 
+      - name: Graduate sem4 tests
+        run: python -m unittest discover -p "test4.py"
