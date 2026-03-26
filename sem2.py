@@ -42,7 +42,19 @@ def jaccard_similarity(a: np.array, b: np.array) -> float:
 
     Это значение в диапазоне [0,1].
     """
-    raise(NotImplementedError("Реализуйте функцию jaccard_similarity"))
+    # Преобразуем рейтинги в бинарные маски
+    a_bin, b_bin = a > 0, b > 0
+
+    # Пересечение и объединение
+    intersection = np.logical_and(a_bin, b_bin).sum()
+    union = np.logical_or(a_bin, b_bin).sum()
+
+    # Если объединение пустое, возвращаем 0
+    if union == 0:
+        return 0.0
+
+    # Возвращаем отношение
+    return intersection / union
 
 
 def build_user_user_matrix(user_item_matrix: np.ndarray) -> np.ndarray:
@@ -65,7 +77,24 @@ def build_user_user_matrix(user_item_matrix: np.ndarray) -> np.ndarray:
     Returns:
         Матрица схожести Жаккара (n_users, n_users).
     """
-    raise(NotImplementedError("Реализуйте функцию build_user_user_matrix"))
+    # Бинаризуем матрицу
+    X = (np.array(user_item_matrix) > 0).astype(int)
+
+    # Пересечение для всех пар пользователей
+    intersection = X @ X.T
+
+    # Количество оценённых фильмов для каждого пользователя
+    rated_items_sums = X.sum(axis=1)
+
+    # Объединение и защита от деления на 0
+    union = rated_items_sums[:, None] + rated_items_sums[None, :] - intersection
+    union = np.where(union == 0, 1, union)
+
+    # Матрица схожести, на диагонали ставим 1
+    sim_matrix = intersection / union
+    np.fill_diagonal(sim_matrix, 1.0)
+
+    return sim_matrix
 
 
 def predict_rating(
@@ -98,7 +127,38 @@ def predict_rating(
     Returns:
         Предсказанный рейтинг (float).
     """
-    raise(NotImplementedError("Реализуйте функцию predict_rating"))
+    # Матрица рейтингов
+    user_item_matrix = np.array(user_item_matrix)
+
+    # Все рейтинги фильма item_id
+    item_ratings = user_item_matrix[:, item_id]
+
+    # Строка активного пользователя
+    similarities = user_user_matrix[user_id]
+
+    # Оставляем только тех пользователей, кто оценил фильм
+    rated_mask = item_ratings > 0
+    if not np.any(rated_mask):
+        return 0.0
+
+    # Фильтруем сходства и рейтинги
+    filtered_similarities = similarities[rated_mask]
+    filtered_ratings = item_ratings[rated_mask]
+
+    # Сортировка по убыванию сходства
+    sorted_idx = np.argsort(filtered_similarities)[::-1]
+
+    # Берём top-k
+    topk_similarities = filtered_similarities[sorted_idx][:topk]
+    topk_ratings = filtered_ratings[sorted_idx][:topk]
+
+    # Сумма сходств
+    sum_sim = topk_similarities.sum()
+    if sum_sim == 0:
+        return 0.0
+
+    # Возвращаем предсказанный рейтинг
+    return float(np.dot(topk_similarities, topk_ratings) / sum_sim)
 
 
 def predict_items_for_user(
@@ -133,7 +193,39 @@ def predict_items_for_user(
     Returns:
         Список рекомендованных индексов фильмов (item_id).
     """
-    raise(NotImplementedError("Реализуйте функцию predict_items_for_user"))
+    # Матрица рейтингов
+    user_item_matrix = np.array(user_item_matrix)
+
+    # Строка активного пользователя
+    similarities = user_user_matrix[user_id].copy()
+
+    # Убираем самого себя, берём top-r
+    similarities[user_id] = -1
+    top_r_neighbors = np.argsort(similarities)[-r:]
+
+    # Собираем фильмы-кандидаты (рейтинг >= 4.0)
+    items_ratings = {}
+    for neighbor in top_r_neighbors:
+        neighbor_ratings = user_item_matrix[neighbor]
+        liked_items = np.where(neighbor_ratings >= 4.0)[0]
+        for item_id in liked_items:
+            if item_id not in items_ratings:
+                items_ratings[item_id] = []
+            items_ratings[item_id].append(neighbor_ratings[item_id])
+
+    # Считаем ср. рейтинг для фильмов-кандидатов, исключая оценённые
+    rated_mask = user_item_matrix[user_id] > 0
+    candidates = {
+        item_id: np.mean(ratings)  # Средний рейтинг
+        for item_id, ratings in items_ratings.items()
+        if not rated_mask[item_id]  # Исключаем оценённые
+    }
+
+    # Сортируем по убыванию ср. рейтинга
+    sorted_items = sorted(candidates.items(), key=lambda x: x[1], reverse=True)
+
+    # Возвращаем список рекомендаций
+    return [int(item_id) for item_id, _ in sorted_items[:k]]
 
 
 if __name__ == "__main__":
@@ -155,7 +247,8 @@ if __name__ == "__main__":
     user_id, item_id = 1, 47
     movie_name = id_to_movie(item_id)
     print(
-        f"Предсказываем рейтинг фильма {item_id} - {movie_name} для пользователя {user_id}"
+        f"Предсказываем рейтинг фильма {item_id} - "
+        f"{movie_name} для пользователя {user_id}"
     )
 
     tic = time()

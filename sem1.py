@@ -62,7 +62,47 @@ def top_n_recommend(
     Returns:
         Список кортежей (movieId, avg_rating, rating_count, title).
     """
-    raise(NotImplementedError("Реализуйте функцию top_n_recommend"))
+    # Загружаем данные
+    ratings_df, movies_df = load_data()
+
+    # Рассчитываем ср. рейтинг и кол-во оценок для каждого movieId
+    stats = (
+        ratings_df
+        .groupby("movieId")
+        .agg(
+            avg_rating=("rating", "mean"),
+            rating_count=("rating", "count"),
+        )
+        .reset_index()
+    )
+
+    # Фильтруем фильмы с недостаточным кол-вом оценок
+    stats = stats[stats["rating_count"] >= min_ratings]
+
+    # Сортируем по ср. рейтингу и количеству оценок (оба по убыванию)
+    stats = stats.sort_values(
+        by=["avg_rating", "rating_count"],
+        ascending=[False, False],
+    )
+
+    # Выбираем топ-n фильмов
+    stats = stats.head(n_recommendations)
+
+    # Добавляем название (left join)
+    stats = stats.merge(movies_df[["movieId", "title"]], on="movieId", how="left")
+
+    # Формируем список кортежей
+    top_n_recs = [
+        (
+            int(row.movieId),
+            float(row.avg_rating),
+            int(row.rating_count),
+            row.title,
+        )
+        for row in stats.itertuples()
+    ]
+
+    return top_n_recs
 
 
 def evaluate_rec_systems(
@@ -86,7 +126,29 @@ def evaluate_rec_systems(
     Returns:
         Словарь {'random_accuracy', 'popular_accuracy'}.
     """
-    raise(NotImplementedError("Реализуйте функцию evaluate_rec_systems"))
+    # Загружаем данные
+    ratings_df, _ = load_data()
+
+    # Получаем случайные рекомендации, популярные фильмы
+    random_recs = random_recommend(
+        n_recommendations=n_recommendations,
+        seed=random_state
+    )
+    popular_recs = top_n_recommend(n_recommendations=n_recommendations)
+    popular_movie_ids = [movie_id for movie_id, _, _, _ in popular_recs]
+
+    # Определяем фильмы, которые пользователь уже оценил
+    rated_movies = set(ratings_df[ratings_df["userId"] == user_id]["movieId"])
+
+    # Accuracy (случайные рекомендации)
+    random_hits = sum(1 for movie in random_recs if movie in rated_movies)
+    random_accuracy = random_hits / n_recommendations
+
+    # Accuracy (популярные фильмы)
+    popular_hits = sum(1 for movie in popular_movie_ids if movie in rated_movies)
+    popular_accuracy = popular_hits / n_recommendations
+
+    return {"random_accuracy": random_accuracy, "popular_accuracy": popular_accuracy}
 
 
 if __name__ == "__main__":
