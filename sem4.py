@@ -67,13 +67,24 @@ class SVDRecommender:
 
     def _build_factorization(self):
         max_rank = min(self.ui_matrix.shape)
-        self.U, self.S, self.V = singular_value_decomposition(self.ui_matrix, k=max_rank)
+        self.U, self.S, self.V = singular_value_decomposition(
+            self.ui_matrix, k=max_rank
+        )
 
     def _reconstruct_matrix(self, k: int) -> np.ndarray:
         if k <= 0:
             raise ValueError("k must be positive")
 
-        raise NotImplementedError("Реализуйте восстановление матрицы")
+        # Берём первые k факторов
+        k_eff = min(k, self.S.shape[0])
+        U_k = self.U[:, :k_eff]
+        S_k = self.S[:k_eff]
+        V_k = self.V[:k_eff, :]
+
+        # Восстанавливаем матрицу
+        X_hat = U_k @ np.diag(S_k) @ V_k
+
+        return X_hat
 
     def predict_rating(self, user_id: int, item_id: int, k: int = 20) -> float:
         """
@@ -86,7 +97,23 @@ class SVDRecommender:
         3) Предсказание для пары (user_id, item_id) берём из X_hat.
         4) Обрезаем результат в диапазон [0.0, 5.0].
         """
-        raise NotImplementedError("Реализуйте предсказание рейтинга")
+        # Проверяем входные параметры
+        n_users, n_items = self.ui_matrix.shape
+        if not (0 <= user_id < n_users):
+            raise IndexError("user_id out of bounds")
+        if not (0 <= item_id < n_items):
+            raise IndexError("item_id out of bounds")
+        if k <= 0:
+            raise ValueError("k must be positive")
+
+        # Восстанавливаем матрицу
+        X_hat = self._reconstruct_matrix(k)
+
+        # Берём предсказание
+        pred = X_hat[user_id, item_id]
+
+        # Клипируем результат
+        return float(np.clip(pred, 0.0, 5.0))
 
     def predict_items_for_user(
         self, user_id: int, k: int = 20, n_recommendations: int = 5
@@ -101,7 +128,34 @@ class SVDRecommender:
         4) Сортируем кандидатов по убыванию прогнозного рейтинга.
         5) Возвращаем top-n индексы фильмов.
         """
-        raise NotImplementedError("Реализуйте рекомендацию фильмов")
+        # Проверяем входные параметры
+        n_users, _ = self.ui_matrix.shape
+        if not (0 <= user_id < n_users):
+            raise IndexError("user_id out of bounds")
+        if k <= 0:
+            raise ValueError("k must be positive")
+        if n_recommendations <= 0:
+            raise ValueError("n_recommendations must be > 0")
+
+        # Восстанавливаем матрицу
+        X_hat = self._reconstruct_matrix(k)
+
+        # Прогнозы пользователя
+        user_preds = X_hat[user_id]
+
+        # Берём только фильмы, которые пользователь не оценивал
+        unseen_items = np.where(self.ui_matrix[user_id] == 0)[0]
+        if unseen_items.size == 0:
+            return []
+
+        # Сортируем кандидатов
+        sorted_idx = np.argsort(user_preds[unseen_items])[::-1]
+
+        # Берём top-n рекомендаций
+        topn_recs = unseen_items[sorted_idx[:n_recommendations]]
+
+        # Возвращаем top-n списком
+        return [int(i) for i in topn_recs]
 
 
 if __name__ == "__main__":
@@ -116,7 +170,8 @@ if __name__ == "__main__":
     d_max = np.max(diff)
     d_norm = np.abs(diff).mean()
     print(
-        f"Reconstruction error (k={k}): min={d_min:.4f}, max={d_max:.4f}, mean={d_norm:.4f}"
+        f"Reconstruction error (k={k}): min={d_min:.4f}, "
+        f"max={d_max:.4f}, mean={d_norm:.4f}"
     )
 
     recs = recommender.predict_items_for_user(1, k=10, n_recommendations=5)
